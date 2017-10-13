@@ -193,8 +193,13 @@ class FullyConnectedNet(object):
 
         for i in range(self.num_layers):
             self.params['W{}'.format(i+1)] = np.random.normal(loc=0.0,scale=weight_scale,
-                                           size=(all_dims[i], all_dims[i+1])),
+                                           size=(all_dims[i], all_dims[i+1]))
             self.params['b{}'.format(i+1)] = np.zeros(all_dims[i+1])
+
+            if (self.use_batchnorm) & (i != (self.num_layers - 1)):
+                self.params['gamma{}'.format(i+1)] = np.ones(all_dims[i+1])
+                self.params['beta{}'.format(i+1)] = np.zeros(all_dims[i+1])
+
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -253,17 +258,33 @@ class FullyConnectedNet(object):
         # layer, etc.                                                              #
         ############################################################################
         
+        #create conainers
+        cache = {}
+
         L = self.num_layers
         z1 = X
 
-        #L-1 affine-relu forwards
-        for i in range(1,L-1):
-            z, cache1 = affine_relu_forward(z1, self.params['W{}'.format(i)],
-             self.params['b{}'.format(i)])
+        #L-1 affine-relu forwards or affine-batchnorm-relu forwards
+        for i in range(1, L):
+
+            # Forward flow with batchnorm
+            if self.use_batchnorm:
+                z, cache[i] = batch_relu_forward(
+                                      z1,
+                                      self.params['W{}'.format(i)],
+                                      self.params['b{}'.format(i)],
+                                      self.params['gamma{}'.format(i)],
+                                      self.params['beta{}'.format(i)],
+                                      bn_param=self.bn_params[i-1])
+            else:
+                z, cache[i] = affine_relu_forward(
+                                z1, 
+                                self.params['W{}'.format(i)],
+                                self.params['b{}'.format(i)])
             z1 = z
 
         #Last affine forward
-        scores, cache = affine_forward(z1,self.params['W{}'.format(L)],self.params['b{}'.format(L)])
+        scores, cache[L] = affine_forward(z1,self.params['W{}'.format(L)],self.params['b{}'.format(L)])
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -286,7 +307,31 @@ class FullyConnectedNet(object):
         # automated tests, make sure that your L2 regularization includes a factor #
         # of 0.5 to simplify the expression for the gradient.                      #
         ############################################################################
-        pass
+        # Get the loss and the gradient in the last layer
+        loss, dscores = softmax_loss(scores, y)
+        # Add regularization to the loss function Wi*Wi
+        for i in range(1, self.num_layers+1):
+            loss += 0.5*self.reg*np.sum(self.params['W{}'.format(i)]*self.params['W{}'.format(i)])
+
+        #Backpropagation to first layer
+        for i in range(self.num_layers, 0, -1):
+            if i!=self.num_layers:
+                if self.use_batchnorm:
+                    (dscores, grads['W{}'.format(i)], grads['b{}'.format(i)],
+                    grads['gamma{}'.format(i)], grads['beta{}'.format(i)]) = batch_relu_backward(
+                                                                dscores, cache[i])
+                else:
+                    dscores, grads['W{}'.format(i)], grads['b{}'.format(i)] = affine_relu_backward(
+                                                                dscores, cache[i])
+                # Add regularization to the weights gradient
+                grads['W{}'.format(i)] += self.reg*self.params['W{}'.format(i)]
+            else:
+                dscores, grads['W{}'.format(i)], grads['b{}'.format(i)] = affine_backward(
+                                                            dscores,
+                                                            cache[i]
+                                                            )
+                # Add regularization to the weights gradient
+                grads['W{}'.format(i)] += self.reg*self.params['W{}'.format(i)]
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
